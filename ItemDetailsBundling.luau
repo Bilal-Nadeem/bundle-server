@@ -34,7 +34,7 @@ if RunService:IsServer() then
 
 	local CREDENTIALS = require(ServerStorage.CREDENTIALS)
 
-	-- e.g. "https://your-server.com"
+	-- e.g. "https://bundles.example.com"
 	local GET_LINKED_BUNDLES_URL = CREDENTIALS.WEB_SERVER.URL .. '/api/bundles/%d'
 
 	--[[

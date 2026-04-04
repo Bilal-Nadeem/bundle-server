@@ -122,6 +122,36 @@ local function GetLinkedBundlesAsync(assetId)
 end
 ```
 
+## Deployment (VPS + Nginx + SSL)
+
+The included `setup.sh` handles everything automatically — same pattern as roproxy.
+
+```bash
+# On your VPS, clone/copy the project then run:
+sudo bash setup.sh
+```
+
+It will ask for:
+- **Domain** — e.g. `bundles.example.com` (point DNS to your VPS IP first)
+- **Email** — for Let's Encrypt SSL
+- **API key** — secret used in `x-api-key` header from Roblox
+- **Port** — default `3001` (use a different port if 3000 is taken by roproxy)
+- **Cache TTL** — default 30 days
+
+After setup, the server runs as a systemd service (`bundle-server`) and auto-restarts on crash.
+
+```bash
+systemctl status bundle-server     # check status
+journalctl -u bundle-server -f     # live logs
+systemctl restart bundle-server    # restart after update
+```
+
+To update the server after code changes:
+```bash
+cp -r /path/to/new/files/* /opt/bundle-server/
+systemctl restart bundle-server
+```
+
 ## File structure
 
 ```
