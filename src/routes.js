@@ -38,12 +38,7 @@ router.get('/bundles/:assetId', async (req, res) => {
 
     logger.info('cache_hit', { assetId, bundleCount: bundles.length });
 
-    return res.json({
-      assetId,
-      source: 'cache',
-      cachedAt: new Date(assetEntry.cachedAt).toISOString(),
-      bundles,
-    });
+    return res.json({ assetId, bundles });
   }
 
   // --- In-flight deduplication ---
@@ -53,7 +48,7 @@ router.get('/bundles/:assetId', async (req, res) => {
     logger.info('cache_dedup', { assetId });
     try {
       const rawBundles = await inFlight.get(assetId);
-      return res.json({ assetId, source: 'roblox', cachedAt: new Date().toISOString(), bundles: rawBundles });
+      return res.json({ assetId, bundles: rawBundles });
     } catch (err) {
       return res.status(502).json({ error: 'Failed to fetch data from Roblox API', detail: err.message });
     }
@@ -81,7 +76,7 @@ router.get('/bundles/:assetId', async (req, res) => {
 
   try {
     const rawBundles = await fetchPromise;
-    return res.json({ assetId, source: 'roblox', cachedAt: new Date().toISOString(), bundles: rawBundles });
+    return res.json({ assetId, bundles: rawBundles });
   } catch (err) {
     return res.status(502).json({ error: 'Failed to fetch data from Roblox API', detail: err.message });
   }
