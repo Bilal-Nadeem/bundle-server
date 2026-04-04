@@ -25,6 +25,7 @@ fi
 echo -e "${YELLOW}Please provide the following information:${NC}"
 echo ""
 
+read -p "Enter your GitHub repo URL (e.g., https://github.com/you/bundle-server): " REPO_URL
 read -p "Enter your domain/subdomain (e.g., bundles.example.com): " DOMAIN
 read -p "Enter your email for SSL certificate: " EMAIL
 read -p "Enter API key to protect the server (leave blank to disable auth): " API_KEY
@@ -35,6 +36,7 @@ CACHE_TTL_DAYS=${CACHE_TTL_DAYS:-30}
 
 echo ""
 echo -e "${GREEN}Configuration Summary:${NC}"
+echo "  Repo      : $REPO_URL"
 echo "  Domain    : $DOMAIN"
 echo "  Email     : $EMAIL"
 echo "  API key   : ${API_KEY:-"(none — auth disabled)"}"
@@ -106,9 +108,16 @@ fi
 echo ""
 echo -e "${GREEN}[5/8] Setting up project directory...${NC}"
 PROJECT_DIR="/opt/bundle-server"
-mkdir -p "$PROJECT_DIR"
-cp -r "$(dirname "$0")"/* "$PROJECT_DIR/"
-cd "$PROJECT_DIR"
+
+if [ -d "$PROJECT_DIR/.git" ]; then
+    echo "Existing repo found — pulling latest..."
+    cd "$PROJECT_DIR"
+    git pull
+else
+    echo "Cloning repo..."
+    git clone "$REPO_URL" "$PROJECT_DIR"
+    cd "$PROJECT_DIR"
+fi
 
 # Write .env
 cat > "$PROJECT_DIR/.env" <<EOF
@@ -235,9 +244,8 @@ echo "  Logs    : journalctl -u bundle-server -f"
 echo "  Restart : systemctl restart bundle-server"
 echo "  Stop    : systemctl stop bundle-server"
 echo ""
-echo -e "${YELLOW}Update the server:${NC}"
-echo "  cp -r /your/new/files/* $PROJECT_DIR/"
-echo "  systemctl restart bundle-server"
+echo -e "${YELLOW}Update the server (after pushing to GitHub):${NC}"
+echo "  cd $PROJECT_DIR && git pull && systemctl restart bundle-server"
 echo ""
 echo -e "${YELLOW}SSL auto-renews via certbot. Test renewal:${NC}"
 echo "  certbot renew --dry-run"
