@@ -1,0 +1,21 @@
+{
+  "name": "roblox-bundle-server",
+  "version": "1.0.0",
+  "description": "Web server for Roblox bundle lookups, shared across multiple games",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "node test.js"
+  },
+  "keywords": ["roblox", "bundles", "catalog"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.4.0",
+    "express": "^5.2.1"
+  }
+}
