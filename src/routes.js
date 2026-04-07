@@ -48,10 +48,7 @@ router.get('/bundles/:assetId', async (req, res) => {
       cache.setAssetEntry(assetId, rawBundles.map(b => b.id));
       return rawBundles;
     })
-    .catch(err => {
-      logger.error('roblox_fetch_failed', { assetId, error: err.message });
-      throw err;
-    })
+    .catch(err => { throw err; })
     .finally(() => inFlight.delete(assetId));
 
   inFlight.set(assetId, fetchPromise);

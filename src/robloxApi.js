@@ -9,8 +9,8 @@ const logger = require('./logger');
 const stats  = require('./stats');
 
 const ROBLOX_BUNDLES_URL = 'https://catalog.roblox.com/v1/assets/%s/bundles?limit=100&sortOrder=Asc';
-const MAX_RETRIES        = 2;
-const TIMEOUT_MS         = 8_000;
+const MAX_RETRIES        = 1;
+const TIMEOUT_MS         = 5_000;
 
 // ── Proxy setup ───────────────────────────────────────────────────────────────
 
