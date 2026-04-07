@@ -3,3 +3,4 @@ node_modules/
 logs/*.log
 logs/*.log.old
 BundleServerTest.luau
+proxies.json

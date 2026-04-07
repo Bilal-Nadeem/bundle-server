@@ -11,11 +11,17 @@
     "dev": "node --watch index.js",
     "test": "node test.js"
   },
-  "keywords": ["roblox", "bundles", "catalog"],
+  "keywords": [
+    "roblox",
+    "bundles",
+    "catalog"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "dotenv": "^17.4.0",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "https-proxy-agent": "^5.0.1",
+    "node-fetch": "^2.7.0"
   }
 }

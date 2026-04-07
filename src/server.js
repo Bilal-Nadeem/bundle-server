@@ -3,7 +3,9 @@
 const express = require('express');
 const logger  = require('./logger');
 const cache   = require('./cache');
+const stats   = require('./stats');
 const routes  = require('./routes');
+const { proxyPool } = require('./robloxApi');
 
 const app = express();
 
@@ -36,12 +38,38 @@ app.use('/api', (req, res, next) => {
 
 app.use('/api', routes);
 
-// Health check (no auth) — includes uptime and cache stats for monitoring
+// Health check (no auth)
 app.get('/health', (_req, res) => {
+  const uptimeSec = process.uptime();
+  const h = Math.floor(uptimeSec / 3600);
+  const m = Math.floor((uptimeSec % 3600) / 60);
+  const s = Math.floor(uptimeSec % 60);
+  const uptime = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
+
+  const cacheStats = cache.getStats();
+  const totalRoblox = stats.roblox.requests;
+  const successRate = totalRoblox > 0
+    ? ((stats.roblox.successes / totalRoblox) * 100).toFixed(1) + '%'
+    : 'n/a';
+
+  // Per-proxy summary
+  const proxySummary = Object.entries(stats.proxies).map(([host, p]) => ({
+    host,
+    requests:   p.requests,
+    successes:  p.successes,
+    rateLimits: p.rateLimits,
+    errors:     p.errors,
+    successRate: p.requests > 0 ? ((p.successes / p.requests) * 100).toFixed(1) + '%' : 'n/a',
+  }));
+
   res.json({
     status: 'ok',
-    uptime: Math.floor(process.uptime()),
-    cache: cache.getStats(),
+    uptime,
+    cache:    cacheStats,
+    requests: stats.requests,
+    roblox: { ...stats.roblox, successRate },
+    proxies: proxySummary,
+    proxyCount: proxyPool.length,
   });
 });
 
