@@ -5,3 +5,4 @@ logs/*.log.old
 BundleServerTest.luau
 proxies.json
 cache-data.json
+cookies.json

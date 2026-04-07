@@ -9,7 +9,10 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "test": "node test.js"
+    "test": "node test.js",
+    "stats": "node server-stats.js",
+    "errors": "node check-errors.js",
+    "bench": "node bench.js"
   },
   "keywords": [
     "roblox",

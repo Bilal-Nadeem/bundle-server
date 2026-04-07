@@ -5,7 +5,7 @@ const logger  = require('./logger');
 const cache   = require('./cache');
 const stats   = require('./stats');
 const routes  = require('./routes');
-const { proxyPool, sem } = require('./robloxApi');
+const { proxyPool } = require('./robloxApi');
 
 const app = express();
 
@@ -38,51 +38,52 @@ app.use('/api', (req, res, next) => {
 
 app.use('/api', routes);
 
-// Health check (no auth)
+// Health check (no auth) — always responds quickly, no external calls
 app.get('/health', (_req, res) => {
-  const uptimeSec = process.uptime();
-  const h = Math.floor(uptimeSec / 3600);
-  const m = Math.floor((uptimeSec % 3600) / 60);
-  const s = Math.floor(uptimeSec % 60);
-  const uptime = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
+  try {
+    const uptimeSec = process.uptime();
+    const h = Math.floor(uptimeSec / 3600);
+    const m = Math.floor((uptimeSec % 3600) / 60);
+    const s = Math.floor(uptimeSec % 60);
+    const uptime = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
 
-  const cacheStats = cache.getStats();
-  const totalRoblox = stats.roblox.requests;
-  const successRate = totalRoblox > 0
-    ? ((stats.roblox.successes / totalRoblox) * 100).toFixed(1) + '%'
-    : 'n/a';
+    const totalRoblox = stats.roblox.requests;
+    const successRate = totalRoblox > 0
+      ? ((stats.roblox.successes / totalRoblox) * 100).toFixed(1) + '%'
+      : 'n/a';
 
-  // Per-proxy summary
-  const proxySummary = Object.entries(stats.proxies).map(([host, p]) => ({
-    host,
-    requests:   p.requests,
-    successes:  p.successes,
-    rateLimits: p.rateLimits,
-    errors:     p.errors,
-    successRate: p.requests > 0 ? ((p.successes / p.requests) * 100).toFixed(1) + '%' : 'n/a',
-  }));
+    const proxySummary = Object.entries(stats.proxies).map(([host, p]) => ({
+      host,
+      requests:    p.requests,
+      successes:   p.successes,
+      rateLimits:  p.rateLimits,
+      errors:      p.errors,
+      successRate: p.requests > 0 ? ((p.successes / p.requests) * 100).toFixed(1) + '%' : 'n/a',
+    }));
 
-  res.json({
-    status: 'ok',
-    uptime,
-    cache:    cacheStats,
-    requests: stats.requests,
-    roblox: { ...stats.roblox, successRate },
-    proxies: proxySummary,
-    proxyCount: proxyPool.length,
-    queue: { active: sem.active, waiting: sem.queued, maxConcurrent: sem._limit },
-  });
+    res.json({
+      status:         'ok',
+      uptime,
+      cache:          cache.getStats(),
+      requests:       stats.requests,
+      roblox:         { ...stats.roblox, successRate },
+      proxies:    proxySummary,
+      proxyCount: proxyPool.length,
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
 });
 
 // 404 catch-all
-app.use((req, res) => {
+app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
 // Global error handler
 app.use((err, _req, res, _next) => {
   logger.error('unhandled_error', { message: err.message, stack: err.stack });
-  res.status(500).json({ error: 'Internal server error' });
+  if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
 });
 
 module.exports = app;

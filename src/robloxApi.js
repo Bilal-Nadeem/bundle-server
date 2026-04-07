@@ -9,8 +9,8 @@ const logger = require('./logger');
 const stats  = require('./stats');
 
 const ROBLOX_BUNDLES_URL = 'https://catalog.roblox.com/v1/assets/%s/bundles?limit=100&sortOrder=Asc';
-const MAX_RETRIES        = 3;
-const TIMEOUT_MS         = 4_000; // fail fast so retries happen quickly
+const MAX_RETRIES        = 2;
+const TIMEOUT_MS         = 8_000;
 
 // ── Proxy setup ───────────────────────────────────────────────────────────────
 
@@ -39,6 +39,7 @@ const proxyPool = proxyConfig.enabled
 
 let proxyIndex = 0;
 
+// Pure round-robin — no waiting, no rate limiting.
 function getNextProxy() {
   if (proxyPool.length === 0) return null;
   const entry = proxyPool[proxyIndex % proxyPool.length];
@@ -46,35 +47,9 @@ function getNextProxy() {
   return entry;
 }
 
-// ── Concurrency limiter ───────────────────────────────────────────────────────
-// Caps simultaneous outbound Roblox requests so we don't flood all proxies at
-// once during cold-start bursts. Queued fetches run as soon as a slot opens.
-
-class Semaphore {
-  constructor(limit) {
-    this._limit  = limit;
-    this._active = 0;
-    this._queue  = [];
-  }
-  acquire() {
-    if (this._active < this._limit) { this._active++; return Promise.resolve(); }
-    return new Promise(resolve => this._queue.push(resolve));
-  }
-  release() {
-    this._active--;
-    if (this._queue.length > 0) { this._active++; this._queue.shift()(); }
-  }
-  get queued()  { return this._queue.length; }
-  get active()  { return this._active; }
-}
-
-// Allow 2 concurrent requests per proxy slot — enough throughput without bursting
-const MAX_CONCURRENT = Math.max(proxyPool.length * 2, 6);
-const sem = new Semaphore(MAX_CONCURRENT);
-
 // ── Fetch ─────────────────────────────────────────────────────────────────────
 
-async function _fetch(assetId) {
+async function fetchLinkedBundles(assetId) {
   const url = ROBLOX_BUNDLES_URL.replace('%s', encodeURIComponent(assetId));
   let lastError;
 
@@ -157,13 +132,4 @@ async function _fetch(assetId) {
   throw lastError ?? new Error(`All ${MAX_RETRIES} attempts failed for asset ${assetId}`);
 }
 
-async function fetchLinkedBundles(assetId) {
-  await sem.acquire();
-  try {
-    return await _fetch(assetId);
-  } finally {
-    sem.release();
-  }
-}
-
-module.exports = { fetchLinkedBundles, proxyPool, sem };
+module.exports = { fetchLinkedBundles, proxyPool };

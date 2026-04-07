@@ -85,8 +85,8 @@ function saveToDisk() {
 // Load persisted cache immediately on startup
 loadFromDisk();
 
-// Save every 5 minutes so we don't lose more than 5 min of work on a crash
-setInterval(saveToDisk, 5 * 60 * 1000).unref();
+// Save every 60 seconds so restarts lose at most 1 minute of work
+setInterval(saveToDisk, 60_000).unref();
 
 // ── Periodic cleanup ──────────────────────────────────────────────────────────
 
