@@ -10,7 +10,7 @@ const stats  = require('./stats');
 
 const ROBLOX_BUNDLES_URL = 'https://catalog.roblox.com/v1/assets/%s/bundles?limit=100&sortOrder=Asc';
 const MAX_RETRIES        = 3;
-const TIMEOUT_MS         = 10_000;
+const TIMEOUT_MS         = 4_000; // fail fast so retries happen quickly
 
 // ── Proxy setup ───────────────────────────────────────────────────────────────
 
@@ -29,7 +29,10 @@ const proxyPool = proxyConfig.enabled
         return { host, agent };
       }),
       ...(proxyConfig.useDirect
-        ? [(() => { stats.proxies['direct'] = { requests: 0, successes: 0, rateLimits: 0, errors: 0 }; return { host: 'direct', agent: null }; })()]
+        ? [(() => {
+            stats.proxies['direct'] = { requests: 0, successes: 0, rateLimits: 0, errors: 0 };
+            return { host: 'direct', agent: null };
+          })()]
         : []),
     ]
   : [];
@@ -43,18 +46,44 @@ function getNextProxy() {
   return entry;
 }
 
+// ── Concurrency limiter ───────────────────────────────────────────────────────
+// Caps simultaneous outbound Roblox requests so we don't flood all proxies at
+// once during cold-start bursts. Queued fetches run as soon as a slot opens.
+
+class Semaphore {
+  constructor(limit) {
+    this._limit  = limit;
+    this._active = 0;
+    this._queue  = [];
+  }
+  acquire() {
+    if (this._active < this._limit) { this._active++; return Promise.resolve(); }
+    return new Promise(resolve => this._queue.push(resolve));
+  }
+  release() {
+    this._active--;
+    if (this._queue.length > 0) { this._active++; this._queue.shift()(); }
+  }
+  get queued()  { return this._queue.length; }
+  get active()  { return this._active; }
+}
+
+// Allow 2 concurrent requests per proxy slot — enough throughput without bursting
+const MAX_CONCURRENT = Math.max(proxyPool.length * 2, 6);
+const sem = new Semaphore(MAX_CONCURRENT);
+
 // ── Fetch ─────────────────────────────────────────────────────────────────────
 
-async function fetchLinkedBundles(assetId) {
+async function _fetch(assetId) {
   const url = ROBLOX_BUNDLES_URL.replace('%s', encodeURIComponent(assetId));
   let lastError;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const proxy   = getNextProxy();
+    const proxy    = getNextProxy();
     const proxyKey = proxy?.host ?? 'direct';
 
     stats.roblox.requests++;
-    if (proxy) stats.proxies[proxyKey].requests++;
+    if (stats.proxies[proxyKey]) stats.proxies[proxyKey].requests++;
 
     logger.info('roblox_request', { assetId, proxy: proxyKey, attempt });
 
@@ -73,10 +102,9 @@ async function fetchLinkedBundles(assetId) {
 
       clearTimeout(timer);
 
-      // Retriable status — try next proxy
       if (response.status === 429 || response.status === 503) {
         stats.roblox.rateLimits++;
-        if (proxy) stats.proxies[proxyKey].rateLimits++;
+        if (stats.proxies[proxyKey]) stats.proxies[proxyKey].rateLimits++;
         logger.warn('roblox_rate_limited', { assetId, status: response.status, proxy: proxyKey, attempt });
         lastError = new Error(`Roblox API returned ${response.status} for asset ${assetId}`);
         continue;
@@ -84,7 +112,7 @@ async function fetchLinkedBundles(assetId) {
 
       if (!response.ok) {
         stats.roblox.errors++;
-        if (proxy) stats.proxies[proxyKey].errors++;
+        if (stats.proxies[proxyKey]) stats.proxies[proxyKey].errors++;
         logger.error('roblox_api_error', { assetId, status: response.status, proxy: proxyKey });
         throw new Error(`Roblox API returned ${response.status} for asset ${assetId}`);
       }
@@ -94,7 +122,7 @@ async function fetchLinkedBundles(assetId) {
 
       stats.roblox.successes++;
       if (attempt > 1) stats.roblox.retries++;
-      if (proxy) stats.proxies[proxyKey].successes++;
+      if (stats.proxies[proxyKey]) stats.proxies[proxyKey].successes++;
 
       logger.info('roblox_fetched', { assetId, bundleCount: body.data.length, proxy: proxyKey, attempt });
 
@@ -116,7 +144,7 @@ async function fetchLinkedBundles(assetId) {
       clearTimeout(timer);
       lastError = err;
       stats.roblox.errors++;
-      if (proxy) stats.proxies[proxyKey].errors++;
+      if (stats.proxies[proxyKey]) stats.proxies[proxyKey].errors++;
 
       if (err.name === 'AbortError') {
         logger.warn('roblox_timeout', { assetId, proxy: proxyKey, attempt });
@@ -129,4 +157,13 @@ async function fetchLinkedBundles(assetId) {
   throw lastError ?? new Error(`All ${MAX_RETRIES} attempts failed for asset ${assetId}`);
 }
 
-module.exports = { fetchLinkedBundles, proxyPool };
+async function fetchLinkedBundles(assetId) {
+  await sem.acquire();
+  try {
+    return await _fetch(assetId);
+  } finally {
+    sem.release();
+  }
+}
+
+module.exports = { fetchLinkedBundles, proxyPool, sem };

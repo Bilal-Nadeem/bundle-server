@@ -1,26 +1,26 @@
 'use strict';
 
-const CACHE_TTL_MS    = (parseInt(process.env.CACHE_TTL_DAYS, 10) || 30) * 24 * 60 * 60 * 1000;
-const NEGATIVE_TTL_MS = 60_000; // 60 s cooldown after a 429/error — stops retry spirals
+const fs   = require('fs');
+const path = require('path');
 
-// assetId -> { bundleIds: number[], cachedAt: number }
+const CACHE_TTL_MS = (parseInt(process.env.CACHE_TTL_DAYS, 10) || 30) * 24 * 60 * 60 * 1000;
+const CACHE_FILE   = path.join(__dirname, '..', 'cache-data.json');
+
+// assetId (string) -> { bundleIds: number[], cachedAt: number }
 const assetCache = new Map();
 
-// bundleId -> { id, name, bundleType, items[], cachedAt }
+// bundleId (number) -> { id, name, bundleType, items[], cachedAt }
 const bundleCache = new Map();
 
-// assetId -> { failedAt: number }  — short-lived, prevents hammering a failing asset
-const negativeCache = new Map();
-
-function isExpired(cachedAt, ttl) {
-  return Date.now() - cachedAt > ttl;
+function isExpired(cachedAt) {
+  return Date.now() - cachedAt > CACHE_TTL_MS;
 }
 
 // ── Asset cache ───────────────────────────────────────────────────────────────
 
 function getAssetEntry(assetId) {
   const entry = assetCache.get(String(assetId));
-  if (!entry || isExpired(entry.cachedAt, CACHE_TTL_MS)) return null;
+  if (!entry || isExpired(entry.cachedAt)) return null;
   return entry;
 }
 
@@ -32,7 +32,7 @@ function setAssetEntry(assetId, bundleIds) {
 
 function getBundleEntry(bundleId) {
   const entry = bundleCache.get(Number(bundleId));
-  if (!entry || isExpired(entry.cachedAt, CACHE_TTL_MS)) return null;
+  if (!entry || isExpired(entry.cachedAt)) return null;
   return entry;
 }
 
@@ -46,29 +46,55 @@ function setBundleEntry(bundle) {
   });
 }
 
-// ── Negative cache ────────────────────────────────────────────────────────────
+// ── Persistent cache ──────────────────────────────────────────────────────────
 
-function getNegativeEntry(assetId) {
-  const entry = negativeCache.get(String(assetId));
-  if (!entry || isExpired(entry.failedAt, NEGATIVE_TTL_MS)) {
-    negativeCache.delete(String(assetId));
-    return null;
+function loadFromDisk() {
+  try {
+    if (!fs.existsSync(CACHE_FILE)) return;
+    const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+    let loaded = 0, skipped = 0;
+
+    for (const [k, v] of (data.assets || [])) {
+      if (!isExpired(v.cachedAt)) { assetCache.set(k, v); loaded++; }
+      else skipped++;
+    }
+    for (const [k, v] of (data.bundles || [])) {
+      if (!isExpired(v.cachedAt)) { bundleCache.set(Number(k), v); loaded++; }
+      else skipped++;
+    }
+
+    console.log(`[cache] Loaded ${loaded} entries from disk (${skipped} expired, skipped)`);
+  } catch (err) {
+    console.error('[cache] Failed to load from disk:', err.message);
   }
-  return entry;
 }
 
-function setNegativeEntry(assetId) {
-  negativeCache.set(String(assetId), { failedAt: Date.now() });
+function saveToDisk() {
+  try {
+    const data = {
+      savedAt: Date.now(),
+      assets:  [...assetCache.entries()],
+      bundles: [...bundleCache.entries()],
+    };
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(data), 'utf8');
+  } catch (err) {
+    console.error('[cache] Failed to save to disk:', err.message);
+  }
 }
+
+// Load persisted cache immediately on startup
+loadFromDisk();
+
+// Save every 5 minutes so we don't lose more than 5 min of work on a crash
+setInterval(saveToDisk, 5 * 60 * 1000).unref();
 
 // ── Periodic cleanup ──────────────────────────────────────────────────────────
 
 function pruneExpired() {
-  let prunedAssets = 0, prunedBundles = 0, prunedNegative = 0;
-  for (const [k, e] of assetCache)    { if (isExpired(e.cachedAt,  CACHE_TTL_MS))    { assetCache.delete(k);    prunedAssets++;   } }
-  for (const [k, e] of bundleCache)   { if (isExpired(e.cachedAt,  CACHE_TTL_MS))    { bundleCache.delete(k);   prunedBundles++;  } }
-  for (const [k, e] of negativeCache) { if (isExpired(e.failedAt,  NEGATIVE_TTL_MS)) { negativeCache.delete(k); prunedNegative++; } }
-  return { prunedAssets, prunedBundles, prunedNegative };
+  let prunedAssets = 0, prunedBundles = 0;
+  for (const [k, e] of assetCache)  { if (isExpired(e.cachedAt)) { assetCache.delete(k);  prunedAssets++;  } }
+  for (const [k, e] of bundleCache) { if (isExpired(e.cachedAt)) { bundleCache.delete(k); prunedBundles++; } }
+  return { prunedAssets, prunedBundles };
 }
 
 setInterval(pruneExpired, 60 * 60 * 1000).unref();
@@ -77,14 +103,9 @@ setInterval(pruneExpired, 60 * 60 * 1000).unref();
 
 function getStats() {
   let validAssets = 0, expiredAssets = 0, validBundles = 0, expiredBundles = 0;
-  for (const e of assetCache.values())  { isExpired(e.cachedAt, CACHE_TTL_MS)  ? expiredAssets++  : validAssets++;  }
-  for (const e of bundleCache.values()) { isExpired(e.cachedAt, CACHE_TTL_MS)  ? expiredBundles++ : validBundles++; }
-  return {
-    validAssets, expiredAssets,
-    validBundles, expiredBundles,
-    negativeCached: negativeCache.size,
-    cacheTtlDays: CACHE_TTL_MS / 86400000,
-  };
+  for (const e of assetCache.values())  { isExpired(e.cachedAt) ? expiredAssets++  : validAssets++;  }
+  for (const e of bundleCache.values()) { isExpired(e.cachedAt) ? expiredBundles++ : validBundles++; }
+  return { validAssets, expiredAssets, validBundles, expiredBundles, cacheTtlDays: CACHE_TTL_MS / 86400000 };
 }
 
-module.exports = { getAssetEntry, setAssetEntry, getBundleEntry, setBundleEntry, getNegativeEntry, setNegativeEntry, getStats, pruneExpired };
+module.exports = { getAssetEntry, setAssetEntry, getBundleEntry, setBundleEntry, getStats, pruneExpired, saveToDisk };

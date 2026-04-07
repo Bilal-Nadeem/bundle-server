@@ -6,7 +6,7 @@ const logger = require('./logger');
 const stats  = require('./stats');
 const { fetchLinkedBundles } = require('./robloxApi');
 
-const router  = Router();
+const router   = Router();
 const inFlight = new Map(); // assetId -> Promise<bundle[]>
 
 router.get('/bundles/:assetId', async (req, res) => {
@@ -18,13 +18,6 @@ router.get('/bundles/:assetId', async (req, res) => {
     return res.status(400).json({ error: 'assetId must be numeric' });
   }
 
-  // Negative cache — asset recently failed, don't hammer Roblox again
-  if (cache.getNegativeEntry(assetId)) {
-    stats.requests.negativeHits++;
-    logger.warn('negative_cache_hit', { assetId });
-    return res.status(503).json({ error: 'Temporarily unavailable, try again shortly' });
-  }
-
   // Cache hit
   const assetEntry = cache.getAssetEntry(assetId);
   if (assetEntry) {
@@ -34,7 +27,7 @@ router.get('/bundles/:assetId', async (req, res) => {
     return res.json({ assetId, bundles });
   }
 
-  // In-flight dedup
+  // In-flight dedup — if this asset is already being fetched, wait for that result
   if (inFlight.has(assetId)) {
     logger.info('cache_dedup', { assetId });
     try {
@@ -45,7 +38,7 @@ router.get('/bundles/:assetId', async (req, res) => {
     }
   }
 
-  // Cache miss — fetch from Roblox
+  // Cache miss — queue a fetch through the concurrency limiter
   stats.requests.cacheMisses++;
   logger.info('cache_miss', { assetId });
 
@@ -56,7 +49,7 @@ router.get('/bundles/:assetId', async (req, res) => {
       return rawBundles;
     })
     .catch(err => {
-      cache.setNegativeEntry(assetId); // cooldown — don't retry for 60 s
+      logger.error('roblox_fetch_failed', { assetId, error: err.message });
       throw err;
     })
     .finally(() => inFlight.delete(assetId));
@@ -66,7 +59,7 @@ router.get('/bundles/:assetId', async (req, res) => {
   try {
     const rawBundles = await fetchPromise;
     return res.json({ assetId, bundles: rawBundles });
-  } catch (err) {
+  } catch {
     stats.requests.errors++;
     return res.status(503).json({ error: 'Temporarily unavailable, try again shortly' });
   }

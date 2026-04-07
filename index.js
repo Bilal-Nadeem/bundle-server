@@ -4,6 +4,7 @@ require('dotenv').config();
 
 const app    = require('./src/server');
 const logger = require('./src/logger');
+const cache  = require('./src/cache');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -25,6 +26,7 @@ function shutdown(signal) {
 
   server.close(() => {
     logger.info('server_closed');
+    cache.saveToDisk();
     process.exit(0);
   });
 

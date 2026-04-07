@@ -5,7 +5,7 @@ const logger  = require('./logger');
 const cache   = require('./cache');
 const stats   = require('./stats');
 const routes  = require('./routes');
-const { proxyPool } = require('./robloxApi');
+const { proxyPool, sem } = require('./robloxApi');
 
 const app = express();
 
@@ -70,6 +70,7 @@ app.get('/health', (_req, res) => {
     roblox: { ...stats.roblox, successRate },
     proxies: proxySummary,
     proxyCount: proxyPool.length,
+    queue: { active: sem.active, waiting: sem.queued, maxConcurrent: sem._limit },
   });
 });
 
