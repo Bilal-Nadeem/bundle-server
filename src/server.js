@@ -62,13 +62,14 @@ app.get('/health', (_req, res) => {
     }));
 
     res.json({
-      status:         'ok',
+      status:     'ok',
       uptime,
-      cache:          cache.getStats(),
-      requests:       stats.requests,
-      roblox:         { ...stats.roblox, successRate },
+      cache:      cache.getStats(),
+      requests:   stats.requests,
+      roblox:     { ...stats.roblox, successRate },
       proxies:    proxySummary,
       proxyCount: proxyPool.length,
+      windowed:   stats.getWindowed(),
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });

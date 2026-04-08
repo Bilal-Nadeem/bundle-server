@@ -11,55 +11,46 @@ const inFlight = new Map(); // assetId -> Promise<bundle[]>
 
 router.get('/bundles/:assetId', async (req, res) => {
   const assetId = req.params.assetId;
-  stats.requests.total++;
+  stats.inc.request();
 
   if (!/^\d+$/.test(assetId)) {
-    stats.requests.errors++;
+    stats.inc.reqError();
     return res.status(400).json({ error: 'assetId must be numeric' });
   }
 
   // Cache hit
   const assetEntry = cache.getAssetEntry(assetId);
   if (assetEntry) {
-    stats.requests.cacheHits++;
+    stats.inc.cacheHit();
     const bundles = assetEntry.bundleIds.map(id => cache.getBundleEntry(id)).filter(Boolean);
     logger.info('cache_hit', { assetId, bundleCount: bundles.length });
     return res.json({ assetId, bundles });
   }
 
-  // In-flight dedup — if this asset is already being fetched, wait for that result
-  if (inFlight.has(assetId)) {
-    logger.info('cache_dedup', { assetId });
-    try {
-      const rawBundles = await inFlight.get(assetId);
-      return res.json({ assetId, bundles: rawBundles });
-    } catch {
-      return res.status(503).json({ error: 'Temporarily unavailable, try again shortly' });
-    }
-  }
-
-  // Cache miss — queue a fetch through the concurrency limiter
-  stats.requests.cacheMisses++;
+  // Cache miss — return null immediately and populate cache in the background
+  stats.inc.cacheMiss();
   logger.info('cache_miss', { assetId });
 
-  const fetchPromise = fetchLinkedBundles(assetId)
-    .then(rawBundles => {
-      for (const bundle of rawBundles) cache.setBundleEntry(bundle);
-      cache.setAssetEntry(assetId, rawBundles.map(b => b.id));
-      return rawBundles;
-    })
-    .catch(err => { throw err; })
-    .finally(() => inFlight.delete(assetId));
+  // Only start a fetch if one isn't already running for this asset
+  if (!inFlight.has(assetId)) {
+    const fetchPromise = fetchLinkedBundles(assetId)
+      .then(rawBundles => {
+        for (const bundle of rawBundles) cache.setBundleEntry(bundle);
+        cache.setAssetEntry(assetId, rawBundles.map(b => b.id));
+        logger.info('background_cached', { assetId, bundleCount: rawBundles.length });
+      })
+      .catch(err => {
+        stats.inc.reqError();
+        logger.error('background_fetch_failed', { assetId, error: err.message });
+      })
+      .finally(() => inFlight.delete(assetId));
 
-  inFlight.set(assetId, fetchPromise);
-
-  try {
-    const rawBundles = await fetchPromise;
-    return res.json({ assetId, bundles: rawBundles });
-  } catch {
-    stats.requests.errors++;
-    return res.status(503).json({ error: 'Temporarily unavailable, try again shortly' });
+    inFlight.set(assetId, fetchPromise);
+  } else {
+    logger.info('cache_dedup', { assetId });
   }
+
+  return res.json({ assetId, bundles: null });
 });
 
 router.get('/cache/stats', (_req, res) => {

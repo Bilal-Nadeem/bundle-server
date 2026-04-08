@@ -25,12 +25,12 @@ const proxyPool = proxyConfig.enabled
       ...proxyConfig.proxies.map(host => {
         const url   = `http://${proxyConfig.username}:${proxyConfig.password}@${host}`;
         const agent = new HttpsProxyAgent(url);
-        stats.proxies[host] = { requests: 0, successes: 0, rateLimits: 0, errors: 0 };
+        stats.inc.proxyInit(host);
         return { host, agent };
       }),
       ...(proxyConfig.useDirect
         ? [(() => {
-            stats.proxies['direct'] = { requests: 0, successes: 0, rateLimits: 0, errors: 0 };
+            stats.inc.proxyInit('direct');
             return { host: 'direct', agent: null };
           })()]
         : []),
@@ -57,8 +57,8 @@ async function fetchLinkedBundles(assetId) {
     const proxy    = getNextProxy();
     const proxyKey = proxy?.host ?? 'direct';
 
-    stats.roblox.requests++;
-    if (stats.proxies[proxyKey]) stats.proxies[proxyKey].requests++;
+    stats.inc.robloxReq();
+    stats.inc.proxy(proxyKey, 'requests');
 
     logger.info('roblox_request', { assetId, proxy: proxyKey, attempt });
 
@@ -78,16 +78,16 @@ async function fetchLinkedBundles(assetId) {
       clearTimeout(timer);
 
       if (response.status === 429 || response.status === 503) {
-        stats.roblox.rateLimits++;
-        if (stats.proxies[proxyKey]) stats.proxies[proxyKey].rateLimits++;
+        stats.inc.robloxRL();
+        stats.inc.proxy(proxyKey, 'rateLimits');
         logger.warn('roblox_rate_limited', { assetId, status: response.status, proxy: proxyKey, attempt });
         lastError = new Error(`Roblox API returned ${response.status} for asset ${assetId}`);
         continue;
       }
 
       if (!response.ok) {
-        stats.roblox.errors++;
-        if (stats.proxies[proxyKey]) stats.proxies[proxyKey].errors++;
+        stats.inc.robloxErr();
+        stats.inc.proxy(proxyKey, 'errors');
         logger.error('roblox_api_error', { assetId, status: response.status, proxy: proxyKey });
         throw new Error(`Roblox API returned ${response.status} for asset ${assetId}`);
       }
@@ -95,9 +95,9 @@ async function fetchLinkedBundles(assetId) {
       const body = await response.json();
       if (!Array.isArray(body.data)) throw new Error('Unexpected Roblox API response shape');
 
-      stats.roblox.successes++;
-      if (attempt > 1) stats.roblox.retries++;
-      if (stats.proxies[proxyKey]) stats.proxies[proxyKey].successes++;
+      stats.inc.robloxOk();
+      if (attempt > 1) stats.inc.robloxRetry();
+      stats.inc.proxy(proxyKey, 'successes');
 
       logger.info('roblox_fetched', { assetId, bundleCount: body.data.length, proxy: proxyKey, attempt });
 
@@ -118,8 +118,8 @@ async function fetchLinkedBundles(assetId) {
     } catch (err) {
       clearTimeout(timer);
       lastError = err;
-      stats.roblox.errors++;
-      if (stats.proxies[proxyKey]) stats.proxies[proxyKey].errors++;
+      stats.inc.robloxErr();
+      stats.inc.proxy(proxyKey, 'errors');
 
       if (err.name === 'AbortError') {
         logger.warn('roblox_timeout', { assetId, proxy: proxyKey, attempt });

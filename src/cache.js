@@ -3,8 +3,12 @@
 const fs   = require('fs');
 const path = require('path');
 
-const CACHE_TTL_MS = (parseInt(process.env.CACHE_TTL_DAYS, 10) || 30) * 24 * 60 * 60 * 1000;
-const CACHE_FILE   = path.join(__dirname, '..', 'cache-data.json');
+// Asset-to-bundle mapping can change (bundles linked to an asset may be updated)
+const ASSET_TTL_MS = (parseInt(process.env.CACHE_TTL_DAYS, 10) || 100) * 24 * 60 * 60 * 1000;
+// Bundle contents never change once published, so they are cached permanently
+const BUNDLE_TTL_MS = Infinity;
+
+const CACHE_FILE = path.join(__dirname, '..', 'cache-data.json');
 
 // assetId (string) -> { bundleIds: number[], cachedAt: number }
 const assetCache = new Map();
@@ -12,15 +16,19 @@ const assetCache = new Map();
 // bundleId (number) -> { id, name, bundleType, items[], cachedAt }
 const bundleCache = new Map();
 
-function isExpired(cachedAt) {
-  return Date.now() - cachedAt > CACHE_TTL_MS;
+function isAssetExpired(cachedAt) {
+  return Date.now() - cachedAt > ASSET_TTL_MS;
+}
+
+function isBundleExpired(_cachedAt) {
+  return BUNDLE_TTL_MS === Infinity ? false : Date.now() - _cachedAt > BUNDLE_TTL_MS;
 }
 
 // ── Asset cache ───────────────────────────────────────────────────────────────
 
 function getAssetEntry(assetId) {
   const entry = assetCache.get(String(assetId));
-  if (!entry || isExpired(entry.cachedAt)) return null;
+  if (!entry || isAssetExpired(entry.cachedAt)) return null;
   return entry;
 }
 
@@ -32,7 +40,7 @@ function setAssetEntry(assetId, bundleIds) {
 
 function getBundleEntry(bundleId) {
   const entry = bundleCache.get(Number(bundleId));
-  if (!entry || isExpired(entry.cachedAt)) return null;
+  if (!entry || isBundleExpired(entry.cachedAt)) return null;
   return entry;
 }
 
@@ -55,11 +63,11 @@ function loadFromDisk() {
     let loaded = 0, skipped = 0;
 
     for (const [k, v] of (data.assets || [])) {
-      if (!isExpired(v.cachedAt)) { assetCache.set(k, v); loaded++; }
+      if (!isAssetExpired(v.cachedAt)) { assetCache.set(k, v); loaded++; }
       else skipped++;
     }
     for (const [k, v] of (data.bundles || [])) {
-      if (!isExpired(v.cachedAt)) { bundleCache.set(Number(k), v); loaded++; }
+      if (!isBundleExpired(v.cachedAt)) { bundleCache.set(Number(k), v); loaded++; }
       else skipped++;
     }
 
@@ -92,8 +100,8 @@ setInterval(saveToDisk, 60_000).unref();
 
 function pruneExpired() {
   let prunedAssets = 0, prunedBundles = 0;
-  for (const [k, e] of assetCache)  { if (isExpired(e.cachedAt)) { assetCache.delete(k);  prunedAssets++;  } }
-  for (const [k, e] of bundleCache) { if (isExpired(e.cachedAt)) { bundleCache.delete(k); prunedBundles++; } }
+  for (const [k, e] of assetCache)  { if (isAssetExpired(e.cachedAt))  { assetCache.delete(k);  prunedAssets++;  } }
+  for (const [k, e] of bundleCache) { if (isBundleExpired(e.cachedAt)) { bundleCache.delete(k); prunedBundles++; } }
   return { prunedAssets, prunedBundles };
 }
 
@@ -103,9 +111,9 @@ setInterval(pruneExpired, 60 * 60 * 1000).unref();
 
 function getStats() {
   let validAssets = 0, expiredAssets = 0, validBundles = 0, expiredBundles = 0;
-  for (const e of assetCache.values())  { isExpired(e.cachedAt) ? expiredAssets++  : validAssets++;  }
-  for (const e of bundleCache.values()) { isExpired(e.cachedAt) ? expiredBundles++ : validBundles++; }
-  return { validAssets, expiredAssets, validBundles, expiredBundles, cacheTtlDays: CACHE_TTL_MS / 86400000 };
+  for (const e of assetCache.values())  { isAssetExpired(e.cachedAt)  ? expiredAssets++  : validAssets++;  }
+  for (const e of bundleCache.values()) { isBundleExpired(e.cachedAt) ? expiredBundles++ : validBundles++; }
+  return { validAssets, expiredAssets, validBundles, expiredBundles, assetTtlDays: ASSET_TTL_MS / 86400000, bundleTtlDays: 'permanent' };
 }
 
 module.exports = { getAssetEntry, setAssetEntry, getBundleEntry, setBundleEntry, getStats, pruneExpired, saveToDisk };
