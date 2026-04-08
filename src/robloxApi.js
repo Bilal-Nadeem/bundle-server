@@ -86,8 +86,6 @@ async function fetchLinkedBundles(assetId) {
       }
 
       if (!response.ok) {
-        stats.inc.robloxErr();
-        stats.inc.proxy(proxyKey, 'errors');
         logger.error('roblox_api_error', { assetId, status: response.status, proxy: proxyKey });
         throw new Error(`Roblox API returned ${response.status} for asset ${assetId}`);
       }

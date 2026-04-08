@@ -42,6 +42,11 @@ router.get('/bundles/:assetId', async (req, res) => {
       .catch(err => {
         stats.inc.reqError();
         logger.error('background_fetch_failed', { assetId, error: err.message });
+        // Cache invalid/deleted assets as empty so we don't retry them on every request
+        if (err.message.includes('400')) {
+          cache.setAssetEntry(assetId, []);
+          logger.info('cached_invalid_asset', { assetId });
+        }
       })
       .finally(() => inFlight.delete(assetId));
 
