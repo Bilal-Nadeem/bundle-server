@@ -9,28 +9,11 @@ const { fetchLinkedBundles } = require('./robloxApi');
 const router   = Router();
 const inFlight = new Map(); // assetId -> Promise<bundle[]>
 
-router.get('/bundles/:assetId', async (req, res) => {
-  const assetId = req.params.assetId;
-  stats.inc.request();
+function isNumericAssetId(value) {
+  return /^\d+$/.test(String(value));
+}
 
-  if (!/^\d+$/.test(assetId)) {
-    stats.inc.reqError();
-    return res.status(400).json({ error: 'assetId must be numeric' });
-  }
-
-  // Cache hit
-  const assetEntry = cache.getAssetEntry(assetId);
-  if (assetEntry) {
-    stats.inc.cacheHit();
-    const bundles = assetEntry.bundleIds.map(id => cache.getBundleEntry(id)).filter(Boolean);
-    logger.info('cache_hit', { assetId, bundleCount: bundles.length });
-    return res.json({ assetId, bundles });
-  }
-
-  // Cache miss — return null immediately and populate cache in the background
-  stats.inc.cacheMiss();
-  logger.info('cache_miss', { assetId });
-
+function startBackgroundFetch(assetId) {
   // Only start a fetch if one isn't already running for this asset
   if (!inFlight.has(assetId)) {
     const fetchPromise = fetchLinkedBundles(assetId)
@@ -54,8 +37,55 @@ router.get('/bundles/:assetId', async (req, res) => {
   } else {
     logger.info('cache_dedup', { assetId });
   }
+}
 
-  return res.json({ assetId, bundles: null });
+function getBundleLookupResult(assetId) {
+  // Cache hit
+  const assetEntry = cache.getAssetEntry(assetId);
+  if (assetEntry) {
+    stats.inc.cacheHit();
+    const bundles = assetEntry.bundleIds.map(id => cache.getBundleEntry(id)).filter(Boolean);
+    logger.info('cache_hit', { assetId, bundleCount: bundles.length });
+    return { assetId, bundles };
+  }
+
+  // Cache miss — return null immediately and populate cache in the background
+  stats.inc.cacheMiss();
+  logger.info('cache_miss', { assetId });
+  startBackgroundFetch(assetId);
+  return { assetId, bundles: null };
+}
+
+router.get('/bundles/:assetId', async (req, res) => {
+  const assetId = req.params.assetId;
+  stats.inc.request();
+
+  if (!isNumericAssetId(assetId)) {
+    stats.inc.reqError();
+    return res.status(400).json({ error: 'assetId must be numeric' });
+  }
+
+  return res.json(getBundleLookupResult(assetId));
+});
+
+router.post('/bundles/batch', async (req, res) => {
+  const { assetIds } = req.body || {};
+  stats.inc.request();
+
+  if (!Array.isArray(assetIds) || assetIds.length === 0) {
+    stats.inc.reqError();
+    return res.status(400).json({ error: 'assetIds must be a non-empty array of numeric IDs' });
+  }
+
+  for (const rawAssetId of assetIds) {
+    if (!isNumericAssetId(rawAssetId)) {
+      stats.inc.reqError();
+      return res.status(400).json({ error: 'assetIds must contain only numeric IDs' });
+    }
+  }
+
+  const results = assetIds.map(rawAssetId => getBundleLookupResult(String(rawAssetId)));
+  return res.json({ results });
 });
 
 router.get('/cache/stats', (_req, res) => {

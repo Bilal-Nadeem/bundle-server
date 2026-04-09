@@ -77,6 +77,36 @@ GET /api/bundles/837009922
 
 `source` is `"cache"` on subsequent calls within the TTL window, `"roblox"` when freshly fetched.
 
+### `POST /api/bundles/batch`
+
+Lookup multiple asset IDs in one request.
+
+**Headers**
+```
+x-api-key: <your key>   (required if API_KEY is set)
+Content-Type: application/json
+```
+
+**Example request body**
+```json
+{
+  "assetIds": ["837009922", "837010234", "837010999"]
+}
+```
+
+**Example response**
+```json
+{
+  "results": [
+    { "assetId": "837009922", "bundles": [/* ... */] },
+    { "assetId": "837010234", "bundles": null },
+    { "assetId": "837010999", "bundles": [] }
+  ]
+}
+```
+
+`bundles` is `null` on cache miss while the server fetches in the background (same behavior as the single-item endpoint).
+
 ### `GET /api/cache/stats`
 
 Returns current cache state — useful for monitoring.
@@ -158,7 +188,7 @@ systemctl restart bundle-server
 index.js          Entry point – boots the Express server
 src/
   server.js       Express app, auth middleware, error handler
-  routes.js       /api/bundles/:assetId  and  /api/cache/stats
+  routes.js       /api/bundles/:assetId, /api/bundles/batch, /api/cache/stats
   cache.js        In-memory asset + bundle cache with TTL
   robloxApi.js    Fetches from catalog.roblox.com
 .env.example      Environment variable template
