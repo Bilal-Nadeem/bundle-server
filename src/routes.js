@@ -84,8 +84,18 @@ router.post('/bundles/batch', async (req, res) => {
     }
   }
 
-  const results = assetIds.map(rawAssetId => getBundleLookupResult(String(rawAssetId)));
-  return res.json({ results });
+  const seen = new Map(); // bundleId -> bundle object
+
+  for (const rawAssetId of assetIds) {
+    const { bundles } = getBundleLookupResult(String(rawAssetId));
+    if (bundles !== null) {
+      for (const bundle of bundles) {
+        if (!seen.has(bundle.id)) seen.set(bundle.id, bundle);
+      }
+    }
+  }
+
+  return res.json({ bundles: Array.from(seen.values()) });
 });
 
 router.get('/cache/stats', (_req, res) => {
