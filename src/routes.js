@@ -65,7 +65,8 @@ router.get('/bundles/:assetId', async (req, res) => {
     return res.status(400).json({ error: 'assetId must be numeric' });
   }
 
-  return res.json(getBundleLookupResult(assetId));
+  const { bundles } = getBundleLookupResult(assetId);
+  return res.json({ bundles });
 });
 
 router.post('/bundles/batch', async (req, res) => {
